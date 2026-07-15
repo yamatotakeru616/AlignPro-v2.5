@@ -1,0 +1,6 @@
+{
+  "name": "3D CIM道路線形プロトタイプ",
+  "description": "MapLibre GLとThree.jsを用いた、3D CIM道路アライメント設計・シミュレーションのインタラクティブプロトタイプ。縦断図・横断図のリアルタイム連動、3D線形モデルの可視化、LandXML書き出しをサポート。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

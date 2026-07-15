@@ -1,0 +1,64 @@
+{
+  "firestore": {
+    "collections": {
+      "users": {
+        "description": "User profile metadata",
+        "documents": {
+          "uid": {
+            "fields": {
+              "email": {
+                "type": "string",
+                "description": "User registered email address"
+              },
+              "createdAt": {
+                "type": "timestamp",
+                "description": "User creation time"
+              }
+            }
+          }
+        }
+      },
+      "alignments": {
+        "description": "Saved road alignment design plans",
+        "documents": {
+          "id": {
+            "fields": {
+              "userId": {
+                "type": "string",
+                "description": "UID of the owner"
+              },
+              "name": {
+                "type": "string",
+                "description": "Name of the alignment plan"
+              },
+              "description": {
+                "type": "string",
+                "description": "Optional description of the plan"
+              },
+              "controlPoints": {
+                "type": "array",
+                "description": "Array of ControlPoint objects"
+              },
+              "crossSection": {
+                "type": "object",
+                "description": "CrossSectionParams configuration object"
+              },
+              "sections": {
+                "type": "array",
+                "description": "Array of SectionSegment configuration objects"
+              },
+              "createdAt": {
+                "type": "timestamp",
+                "description": "Creation time"
+              },
+              "updatedAt": {
+                "type": "timestamp",
+                "description": "Last update time"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

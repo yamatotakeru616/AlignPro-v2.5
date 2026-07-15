@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D CIM道路線形プロトタイプ - プロジェクト内容設計書</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    code, pre {
+      font-family: 'JetBrains Mono', monospace;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-6 md:p-12">
+  <div class="max-w-4xl mx-auto bg-slate-900/60 border border-white/10 rounded-2xl p-6 md:p-10 backdrop-blur-md shadow-2xl">
+    
+    <!-- ヘッダー -->
+    <header class="border-b border-white/10 pb-6 mb-8">
+      <div class="flex items-center space-x-3 mb-2 text-emerald-400 text-xs font-mono tracking-widest uppercase">
+        <span>GitNexus コーディング開発憲法準拠</span>
+        <span>•</span>
+        <span>CIM-3D-ROAD v1.0</span>
+      </div>
+      <h1 class="text-3xl font-bold tracking-tight text-white mb-2">3D CIM道路線形プロトタイプ</h1>
+      <p class="text-slate-400 text-sm">MapLibre GLとThree.jsを用いた、インタラクティブな平面・縦断・横断・3D統合線形設計プラットフォーム</p>
+    </header>
+
+    <!-- 目次 -->
+    <nav class="mb-8 p-4 bg-slate-950/40 rounded-xl border border-white/5">
+      <h2 class="text-xs font-mono uppercase tracking-wider text-slate-500 mb-2">設計目次</h2>
+      <ul class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-emerald-400">
+        <li><a href="#section-1" class="hover:underline">1. 画面仕様 (4つのコア機能)</a></li>
+        <li><a href="#section-2" class="hover:underline">2. 状態管理 (State Architecture)</a></li>
+        <li><a href="#section-3" class="hover:underline">3. Android & スマホ操作性と最適化</a></li>
+        <li><a href="#section-4" class="hover:underline">4. 例外時の挙動 (フェイルセーフ設計)</a></li>
+      </ul>
+    </nav>
+
+    <!-- セクション1 -->
+    <section id="section-1" class="mb-10">
+      <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+        <span class="w-2 h-6 bg-emerald-500 rounded-full mr-2"></span>
+        1. 画面仕様 (4つのコア機能)
+      </h2>
+      <div class="space-y-4 text-slate-300 text-sm leading-relaxed">
+        <p>本プロトタイプは、4つのタブビューによりアライメント設計プロセスを包括的にシミュレートします。</p>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="p-4 bg-slate-950/50 rounded-xl border border-white/5">
+            <h3 class="font-semibold text-emerald-400 mb-1">① MAP (平面線形)</h3>
+            <p class="text-xs text-slate-400">MapLibre GLを用いた等高線等価モックマップ上に、始点(BP)、交点(IP)、終点(EP)をマッピング。タッチ・ドラッグでリアルタイムに平面線形(2次ベジエ等によるスムーズ補間)を再計算します。</p>
+          </div>
+          <div class="p-4 bg-slate-950/50 rounded-xl border border-white/5">
+            <h3 class="font-semibold text-emerald-400 mb-1">② DRAWINGS (縦横断面)</h3>
+            <p class="text-xs text-slate-400">SVGによる縦断図(Profile)・横断図(Cross-Section)の同時描画。計画高が地盤高を超える場合は赤色ハッチングで「盛土 (Fill)」、下回る場合は青色ハッチングで「切土 (Cut)」を視覚化します。</p>
+          </div>
+          <div class="p-4 bg-slate-950/50 rounded-xl border border-white/5">
+            <h3 class="font-semibold text-emerald-400 mb-1">③ 3D PREVIEW (3D可視化)</h3>
+            <p class="text-xs text-slate-400">Three.jsのCanvasを用いて、平面座標・縦断・車線幅・路肩・法面勾配から完全に実寸の道路3Dサーフェスメッシュを動的構築。マテリアルカラーで舗装面や切土・盛土法面を区分表示します。</p>
+          </div>
+          <div class="p-4 bg-slate-950/50 rounded-xl border border-white/5">
+            <h3 class="font-semibold text-emerald-400 mb-1">④ EXPORT (成果物書き出し)</h3>
+            <p class="text-xs text-slate-400">設計した線形データをLandXMLに準拠したモックXML、および詳細構造を定義したJSON形式に変換し、エクスポート(ダウンロード・クリップボードコピー)可能です。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- セクション2 -->
+    <section id="section-2" class="mb-10">
+      <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+        <span class="w-2 h-6 bg-emerald-500 rounded-full mr-2"></span>
+        2. 状態管理 (State Architecture)
+      </h2>
+      <p class="text-slate-300 text-sm leading-relaxed mb-4">
+        Reactの `useState` / `useMemo` によるリアクティブ状態ツリーを構築し、2D線形変更イベントが瞬時に縦横断面図・3Dメッシュ更新へとディスパッチされるシステムを組みます。
+      </p>
+      <pre class="p-4 bg-slate-950 rounded-xl border border-white/5 text-xs text-emerald-400 overflow-x-auto">
+// リアルタイム再計算のパイプライン
+[BP/IP/EP 座標変更] ──> [平面補間座標 (50分割)] 
+                         ├──> [縦断標高・地盤高・計画高計算]
+                         └──> [横断面スライダーパラメータ適用]
+                               └──> [3D 道路頂点バッファの動的構築]
+      </pre>
+    </section>
+
+    <!-- セクション3 -->
+    <section id="section-3" class="mb-10">
+      <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+        <span class="w-2 h-6 bg-emerald-500 rounded-full mr-2"></span>
+        3. Android & スマホ操作性と最適化
+      </h2>
+      <ul class="space-y-3 text-slate-300 text-sm leading-relaxed">
+        <li class="flex items-start">
+          <span class="text-emerald-400 mr-2">✔</span>
+          <strong>44px以上のタッチ領域:</strong> コントロールポイントのアンカー、タブ切替子、各最小化スライダートグルに充分なサイズを持たせ、タップミスを防ぎます。
+        </li>
+        <li class="flex items-start">
+          <span class="text-emerald-400 mr-2">✔</span>
+          <strong>干渉スクロールの無効化:</strong> `touch-action: none` を適切に使用し、地図や3Dのドラッグ中に、Android端末特有のブラウザスワイプや引き戻し誤動作を完全防止。
+        </li>
+        <li class="flex items-start">
+          <span class="text-emerald-400 mr-2">✔</span>
+          <strong>VRAM 4GB最適化 (描画停止制御):</strong> 「3D PREVIEW」タブ以外が表示されている時は、Three.jsのレンダリングループ(AnimationFrame)を一時停止し、GPU/バッテリーの消費を完全に節約。
+        </li>
+      </ul>
+    </section>
+
+    <!-- セクション4 -->
+    <section id="section-4" class="mb-8">
+      <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+        <span class="w-2 h-6 bg-emerald-500 rounded-full mr-2"></span>
+        4. 例外時の挙動 (フェイルセーフ設計)
+      </h2>
+      <ul class="space-y-3 text-slate-300 text-sm leading-relaxed">
+        <li class="flex items-start">
+          <span class="text-rose-400 mr-2">✖</span>
+          <strong>点データの衝突ガード:</strong> ドラッグによりBP/IP/EPが極端に近接し逆転するのを防ぐため、最低相互距離（20m）を設定し強制クリップ。
+        </li>
+        <li class="flex items-start">
+          <span class="text-rose-400 mr-2">✖</span>
+          <strong>WebGLコンテキスト競合防止＆初期化失敗救済:</strong> 事前テスト用の別メモリ内 dummyCanvas 方式を採用し、本番 canvas のコンテキスト型固定衝突（A WebGL context could not be created）を完全防止。WebGL初期化失敗時は日本語警告「WebGL が無効か非対応です」と再読み込み復旧ボタンを即時提供。
+        </li>
+      </ul>
+    </section>
+
+    <!-- フッター -->
+    <footer class="border-t border-white/10 pt-4 flex justify-between items-center text-xs text-slate-500">
+      <span>設計書は変更の都度、実装とセットで更新されます。</span>
+      <span class="text-emerald-500/80">© 2026 GitNexus CIM Suite</span>
+    </footer>
+  </div>
+</body>
+</html>
