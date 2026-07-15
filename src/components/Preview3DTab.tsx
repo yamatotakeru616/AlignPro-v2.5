@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { Layers, Rotate3d, Maximize2, AlertTriangle, Play, Pause, HelpCircle, Eye, EyeOff, RefreshCw, Move, Settings, Sun, Moon, Sunrise, Sunset, CloudFog, Car, Compass, Gauge, PlayCircle, PauseCircle, FastForward, Square, RotateCcw, TrendingUp, Download, Trash2, Circle, Database, GripHorizontal, X, Droplets, BookOpen } from 'lucide-react';
 import { AlignmentPoint, CrossSectionParams, StationPoint, SectionSegment, DrainageInletData, GutterDrainageSegment, PileDesignResult, NoiseSegmentResult, HydroplaneSegmentResult } from '../types';
 import { getGroundElevation, getInterpolatedSectionProperties, calculateMultiStageSlope, SlopePoint } from '../utils';
+import { delaunayTriangulate } from '../lib/delaunay';
 
 interface Preview3DTabProps {
   alignment: AlignmentPoint[];
@@ -146,6 +147,12 @@ export default function Preview3DTab({
   const [lccPanelPos, setLccPanelPos] = useState<{ x: number; y: number }>({ x: 300, y: 120 });
   const [simulationYear, setSimulationYear] = useState<number>(0);
   const [repairStrategy, setRepairStrategy] = useState<'none' | 'surface' | 'section'>('none');
+
+  // 点群（Point Cloud）およびTIN地盤用の状態
+  const [pointCloudPoints, setPointCloudPoints] = useState<THREE.Vector3[]>([]);
+  const [showPointCloud, setShowPointCloud] = useState<boolean>(true);
+  const [showTinMesh, setShowTinMesh] = useState<boolean>(false);
+  const [tinIndices, setTinIndices] = useState<number[]>([]);
 
   const [dvrCameraActive, setDvrCameraActive] = useState<boolean>(false);
   const [hydroData, setHydroData] = useState<HydroplaneSegmentResult[]>([]);
@@ -287,6 +294,60 @@ export default function Preview3DTab({
     localStorage.removeItem('3d_stationIndicatorPos');
   };
 
+  // 点群ファイルのパースと状態保存ハンドラー
+  const handlePointCloudUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (!text) return;
+
+      const parsedPoints: THREE.Vector3[] = [];
+      const linesList = text.split('\n');
+
+      const offset = {
+        x: alignment[0]?.x ?? 0,
+        y: alignment[0]?.y ?? 0,
+      };
+
+      linesList.forEach((line) => {
+        const cleanLine = line.trim();
+        if (!cleanLine || cleanLine.startsWith('#')) return;
+
+        // カンマ、スペース、タブで分割
+        const tokens = cleanLine.split(/[,\s]+/).map(Number);
+        if (tokens.length >= 3 && tokens.every((v) => !isNaN(v))) {
+          // tokens[0] = x, tokens[1] = y, tokens[2] = z
+          // アライメントの原点を考慮した3D空間上のローカル座標へ変換
+          const tx = tokens[0] - offset.x;
+          const tz = -(tokens[1] - offset.y); // Y軸はThree.jsの-Z軸
+          const ty = tokens[2]; // Z軸はThree.jsのY軸
+          parsedPoints.push(new THREE.Vector3(tx, ty, tz));
+        }
+      });
+
+      if (parsedPoints.length > 0) {
+        setPointCloudPoints(parsedPoints);
+        
+        // 2D座標に射影してデローネ三角分割を実行
+        const dPoints = parsedPoints.map((p) => ({ x: p.x, y: p.z }));
+        try {
+          const indices = delaunayTriangulate(dPoints);
+          setTinIndices(indices);
+          setShowTinMesh(true); // 自動的にTIN地形をONにする
+          setShowTerrainMesh(false); // 既存のグリッド地形をOFFにする
+        } catch (err) {
+          console.error("Delaunay triangulation failed:", err);
+        }
+      } else {
+        alert("有効なXYZ形式のデータが見つかりませんでした。各行が 'X Y Z' または 'X,Y,Z' の形式になっているか確認してください。");
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const [pierInterval, setPierInterval] = useState<number>(() => {
     const saved = localStorage.getItem('3d_pierInterval');
     return saved !== null ? Number(saved) : 20;
@@ -306,6 +367,8 @@ export default function Preview3DTab({
     const saved = localStorage.getItem('3d_fogDensity');
     return saved !== null ? Number(saved) : 0.0015; // デフォルト 0.0015
   });
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
   const dirLight1Ref = useRef<THREE.DirectionalLight | null>(null);
@@ -3915,6 +3978,13 @@ export default function Preview3DTab({
     let tempMinH = Infinity;
     let tempMaxH = -Infinity;
 
+    if (pointCloudPoints.length > 0) {
+      pointCloudPoints.forEach((p) => {
+        if (p.y < tempMinH) tempMinH = p.y;
+        if (p.y > tempMaxH) tempMaxH = p.y;
+      });
+    }
+
     for (let r = 0; r <= rows; r++) {
       gridPoints[r] = [];
       const currentY = minY + r * dy;
@@ -4031,7 +4101,6 @@ export default function Preview3DTab({
           }
         }
       }
-
       if (contourLines.length > 0) {
         const contourGeo = new THREE.BufferGeometry();
         contourGeo.setAttribute('position', new THREE.Float32BufferAttribute(contourLines, 3));
@@ -4045,7 +4114,75 @@ export default function Preview3DTab({
       }
     }
 
-  }, [alignment, showTerrainMesh, showTerrainContour, contourInterval, performanceMode]);
+    // (C) インポートされた点群の描画
+    if (showPointCloud && pointCloudPoints.length > 0) {
+      const pcGeo = new THREE.BufferGeometry();
+      const pcVertices: number[] = [];
+      const pcColors: number[] = [];
+
+      pointCloudPoints.forEach((p) => {
+        pcVertices.push(p.x, p.y, p.z);
+        const ratio = Math.max(0, Math.min(1, (p.y - tempMinH) / Math.max(1, tempMaxH - tempMinH)));
+        const col = new THREE.Color().lerpColors(new THREE.Color('#3b82f6'), new THREE.Color('#ef4444'), ratio);
+        pcColors.push(col.r, col.g, col.b);
+      });
+
+      pcGeo.setAttribute('position', new THREE.Float32BufferAttribute(pcVertices, 3));
+      pcGeo.setAttribute('color', new THREE.Float32BufferAttribute(pcColors, 3));
+
+      const pcMat = new THREE.PointsMaterial({
+        size: performanceMode === 'eco' ? 3.0 : 2.0,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.85,
+        sizeAttenuation: true
+      });
+
+      const pointsMesh = new THREE.Points(pcGeo, pcMat);
+      terrainGroup.add(pointsMesh);
+    }
+
+    // (D) インポートされた TIN 地面メッシュの描画
+    if (showTinMesh && pointCloudPoints.length > 0 && tinIndices.length > 0) {
+      const tinGeo = new THREE.BufferGeometry();
+      const tinVertices: number[] = [];
+
+      pointCloudPoints.forEach((p) => {
+        tinVertices.push(p.x, p.y, p.z);
+      });
+
+      tinGeo.setAttribute('position', new THREE.Float32BufferAttribute(tinVertices, 3));
+      tinGeo.setIndex(tinIndices);
+      tinGeo.computeVertexNormals();
+
+      const tinMat = new THREE.MeshStandardMaterial({
+        color: '#1e293b',
+        emissive: '#090d16',
+        roughness: 0.85,
+        metalness: 0.15,
+        transparent: true,
+        opacity: 0.75,
+        side: THREE.DoubleSide,
+        wireframe: showWireframe
+      });
+
+      const tinMesh = new THREE.Mesh(tinGeo, tinMat);
+      tinMesh.receiveShadow = true;
+      terrainGroup.add(tinMesh);
+
+      if (!showWireframe) {
+        const tinWireMat = new THREE.MeshBasicMaterial({
+          color: '#4f46e5',
+          wireframe: true,
+          transparent: true,
+          opacity: 0.15
+        });
+        const tinWire = new THREE.Mesh(tinGeo, tinWireMat);
+        terrainGroup.add(tinWire);
+      }
+    }
+
+  }, [alignment, showTerrainMesh, showTerrainContour, contourInterval, performanceMode, pointCloudPoints, showPointCloud, showTinMesh, tinIndices, showWireframe]);
 
   // 2.7. 選択中の測点（または走行中の自車位置）における詳細3D断面メッシュのリアルタイム生成
   useEffect(() => {
@@ -5597,8 +5734,72 @@ export default function Preview3DTab({
           title="道路中心線および横断面の標高データから最急降下法を用いて雨水の流路ベクトルを算出し、3Dシーン上で青い流体パーティクルを表示し、サグ（凹部）を検出して赤いエフェクトで警告表示するシミュレータ"
         >
           <Droplets className={`w-3.5 h-3.5 ${showDrainageSimulation ? 'text-blue-400 animate-bounce' : 'text-slate-500'}`} />
-          <span>排水シミュレータ: {showDrainageSimulation ? 'ON' : 'OFF'}</span>
         </button>
+
+        {/* 点群 (XYZ) インポートボタン */}
+        <div className="flex items-center gap-1 bg-slate-900/80 px-2 py-1 rounded-lg border border-white/5 text-slate-300">
+          <Database className="w-3.5 h-3.5 text-blue-400" />
+          <span className="text-[10px] text-slate-400 font-bold">点群:</span>
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              fileInputRef.current?.click();
+            }}
+            className="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded text-[9px] font-extrabold cursor-pointer transition-colors border border-blue-500/30"
+          >
+            読込
+          </button>
+          <input 
+            type="file" 
+            ref={fileInputRef}
+            accept=".txt,.csv,.xyz" 
+            className="hidden" 
+            onChange={handlePointCloudUpload}
+          />
+          {pointCloudPoints.length > 0 && (
+            <span className="text-[8px] text-emerald-400 font-mono pl-1 select-none">
+              {pointCloudPoints.length.toLocaleString()}点
+            </span>
+          )}
+        </div>
+
+        {pointCloudPoints.length > 0 && (
+          <>
+            {/* 点群表示トグル */}
+            <button
+              onClick={() => {
+                triggerUiVisibility();
+                setShowPointCloud(!showPointCloud);
+              }}
+              className={`px-2 py-1 rounded text-[10px] font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
+                showPointCloud 
+                  ? 'bg-slate-800 border-slate-700 text-slate-200' 
+                  : 'border-white/5 text-slate-500 hover:bg-white/5 bg-slate-950/40'
+              }`}
+              title="インポートした点群（ポイントクラウド）の表示を切り替えます"
+            >
+              {showPointCloud ? <Eye className="w-3 h-3 text-emerald-400" /> : <EyeOff className="w-3 h-3" />}
+              <span>点群: {showPointCloud ? 'ON' : 'OFF'}</span>
+            </button>
+
+            {/* TIN地盤表示トグル */}
+            <button
+              onClick={() => {
+                triggerUiVisibility();
+                setShowTinMesh(!showTinMesh);
+              }}
+              className={`px-2 py-1 rounded text-[10px] font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
+                showTinMesh 
+                  ? 'bg-slate-800 border-slate-700 text-slate-200' 
+                  : 'border-white/5 text-slate-500 hover:bg-white/5 bg-slate-950/40'
+              }`}
+              title="点群から生成されたTIN（不規則三角網）地盤メッシュの表示を切り替えます"
+            >
+              {showTinMesh ? <Eye className="w-3 h-3 text-emerald-400" /> : <EyeOff className="w-3 h-3" />}
+              <span>TIN地盤: {showTinMesh ? 'ON' : 'OFF'}</span>
+            </button>
+          </>
+        )}
 
         {/* 閉じるボタン */}
         <button
